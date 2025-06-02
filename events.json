@@ -13,19 +13,6 @@
     "DeviceId": "Server-Rack3-Unit2"
   },
   {
-    "EventType": "Alert",
-    "Severity": "Critical",
-    "Message": "Temperature sensor reading exceeds critical threshold",
-    "MessageId": "ThermalEvent.1.0.TemperatureThresholdExceeded",
-    "MessageArgs": ["CPU1", "105"],
-    "OriginOfCondition": {
-      "@odata.id": "/redfish/v1/Chassis/1/Thermal"
-    },
-    "DeduplicationTimeWindow": 300,
-    "Actions": ["ShutdownServer", "NotifyAdmin"],
-    "DeviceId": "Server-Rack3-Unit3"
-  },
-  {
     "EventType": "ResourceUpdated",
     "Severity": "OK",
     "Message": "The resource has been updated",
