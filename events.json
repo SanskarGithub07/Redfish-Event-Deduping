@@ -1,0 +1,80 @@
+[
+  {
+    "EventType": "Alert",
+    "Severity": "Critical",
+    "Message": "Temperature sensor reading exceeds critical threshold",
+    "MessageId": "ThermalEvent.1.0.TemperatureThresholdExceeded",
+    "MessageArgs": ["CPU1", "105"],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Chassis/1/Thermal"
+    },
+    "DeduplicationTimeWindow": 300,
+    "Actions": ["ShutdownServer", "NotifyAdmin"],
+    "DeviceId": "Server-Rack3-Unit2"
+  },
+  {
+    "EventType": "Alert",
+    "Severity": "Critical",
+    "Message": "Temperature sensor reading exceeds critical threshold",
+    "MessageId": "ThermalEvent.1.0.TemperatureThresholdExceeded",
+    "MessageArgs": ["CPU1", "105"],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Chassis/1/Thermal"
+    },
+    "DeduplicationTimeWindow": 300,
+    "Actions": ["ShutdownServer", "NotifyAdmin"],
+    "DeviceId": "Server-Rack3-Unit3"
+  },
+  {
+    "EventType": "ResourceUpdated",
+    "Severity": "OK",
+    "Message": "The resource has been updated",
+    "MessageId": "ResourceEvent.1.0.ResourceUpdated",
+    "MessageArgs": ["/redfish/v1/Systems/1"],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Systems/1"
+    },
+    "DeduplicationTimeWindow": 60,
+    "Actions": ["LogChange"],
+    "DeviceId": "Server-Rack3-Unit2"
+  },
+  {
+    "EventType": "StatusChange",
+    "Severity": "Warning",
+    "Message": "Fan speed has been reduced due to the system entering a low power state",
+    "MessageId": "ThermalEvent.1.0.FanSpeedReduced",
+    "MessageArgs": ["Chassis1Fan3"],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Chassis/1/Thermal/Fans/3"
+    },
+    "DeduplicationTimeWindow": 180,
+    "Actions": ["MonitorTemperature"],
+    "DeviceId": "Server-Rack3-Unit2"
+  },
+  {
+    "EventType": "ResourceAdded",
+    "Severity": "OK",
+    "Message": "A new drive has been inserted",
+    "MessageId": "StorageEvent.1.0.DriveInserted",
+    "MessageArgs": ["Drive Bay 2"],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Systems/1/Storage/1/Drives/2"
+    },
+    "DeduplicationTimeWindow": 120,
+    "Actions": ["InitializeDrive", "UpdateInventory"],
+    "DeviceId": "Server-Rack3-Unit2"
+  },
+  {
+    "EventType": "Alert",
+    "Severity": "Warning",
+    "Message": "Power supply redundancy has been lost",
+    "MessageId": "PowerEvent.1.0.PowerSupplyRedundancyLost",
+    "MessageArgs": [],
+    "OriginOfCondition": {
+      "@odata.id": "/redfish/v1/Chassis/1/Power"
+    },
+    "DeduplicationTimeWindow": 600,
+    "Actions": ["CheckPowerSupplies", "NotifyAdmin"],
+    "DeviceId": "Server-Rack3-Unit2" 
+  }
+]
