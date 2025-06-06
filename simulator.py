@@ -4,6 +4,8 @@ import requests
 import time
 import uuid
 import argparse
+import os
+import glob
 from datetime import datetime
 
 logging.basicConfig(
@@ -13,21 +15,66 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class RedfishEventSimulator:
-    def __init__(self, emulator_host="localhost", emulator_port=5000, events_file="events.json"):
+    def __init__(self, emulator_host="localhost", emulator_port=5000):
         self.emulator_base_url = f"http://{emulator_host}:{emulator_port}"
-        self.events_file = events_file
         self.subscription_id = None
         self.subscription_url = None
         
-    def load_events(self):
+    def load_generic_events(self, events_file="events_generic.json"):
         try:
-            with open(self.events_file, 'r') as f:
+            with open(events_file, 'r') as f:
                 events_data = json.load(f)
-            logger.info(f"Loaded {len(events_data)} events from {self.events_file}")
+            logger.info(f"Loaded {len(events_data)} generic events from {events_file}")
             return events_data
         except Exception as e:
-            logger.error(f"Error loading events from {self.events_file}: {str(e)}")
+            logger.error(f"Error loading generic events from {events_file}: {str(e)}")
             return []
+    
+    def load_device_config(self, config_file):
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            device_id = config_data.get('device_id', 'Unknown')
+            events = config_data.get('events', [])
+            logger.info(f"Loaded {len(events)} events for device {device_id} from {config_file}")
+            return config_data
+        except Exception as e:
+            logger.error(f"Error loading device config from {config_file}: {str(e)}")
+            return None
+    
+    def load_all_device_configs(self):
+        config_files = glob.glob("config_*.json")
+        device_configs = []
+        
+        for config_file in config_files:
+            config = self.load_device_config(config_file)
+            if config:
+                device_configs.append(config)
+        
+        logger.info(f"Loaded configurations for {len(device_configs)} devices")
+        return device_configs
+    
+    def get_events_from_config(self, config_data):
+        events = []
+        device_id = config_data.get('device_id', 'Unknown')
+        
+        for event in config_data.get('events', []):
+            event_copy = event.copy()
+            event_copy['DeviceId'] = device_id
+            events.append(event_copy)
+        
+        return events
+    
+    def prepare_generic_events(self, generic_events, device_id=None):
+        prepared_events = []
+        
+        for event in generic_events:
+            event_copy = event.copy()
+            if device_id:
+                event_copy['DeviceId'] = device_id
+            prepared_events.append(event_copy)
+        
+        return prepared_events
             
     def create_subscription(self, destination="http://localhost:5001/events"):
         subscription_id = str(uuid.uuid4())[:8]
@@ -81,6 +128,7 @@ class RedfishEventSimulator:
                 "EventType": event_data.get("EventType", "Alert"),
                 "Message": event_data.get("Message", "Test event"),
                 "MessageId": event_data.get("MessageId", "Alert.1.0"),
+                "MessageArgs": event_data.get("MessageArgs", []),
                 "OriginOfCondition": event_data.get("OriginOfCondition", {}),
                 "Severity": event_data.get("Severity", "OK"),
                 "DeduplicationTimeWindow": deduplication_time_window,
@@ -171,13 +219,76 @@ class RedfishEventSimulator:
                 time.sleep(interval)
                 
         return successful_sends
-            
-    def run_simulation(self, delay=2, destination=None, send_duplicates=False, duplicate_count=3, duplicate_interval=1):
-        events = self.load_events()
+    
+    def run_generic_simulation(self, events_file="events_generic.json", device_id=None, 
+                             delay=2, destination=None, send_duplicates=False, 
+                             duplicate_count=3, duplicate_interval=1):
+        events = self.load_generic_events(events_file)
         if not events:
-            logger.error("No events to simulate")
+            logger.error("No generic events to simulate")
             return 0
+        
+        events = self.prepare_generic_events(events, device_id)
+        
+        return self._run_simulation_with_events(
+            events, delay, destination, send_duplicates, 
+            duplicate_count, duplicate_interval
+        )
+    
+    def run_device_specific_simulation(self, config_file, delay=2, destination=None, 
+                                     send_duplicates=False, duplicate_count=3, 
+                                     duplicate_interval=1):
+        config_data = self.load_device_config(config_file)
+        if not config_data:
+            logger.error(f"Failed to load device config from {config_file}")
+            return 0
+        
+        events = self.get_events_from_config(config_data)
+        if not events:
+            logger.error(f"No events found in device config {config_file}")
+            return 0
+        
+        device_name = config_data.get('device_name', config_data.get('device_id', 'Unknown'))
+        logger.info(f"Running simulation for device: {device_name}")
+        
+        return self._run_simulation_with_events(
+            events, delay, destination, send_duplicates, 
+            duplicate_count, duplicate_interval
+        )
+    
+    def run_all_devices_simulation(self, delay=2, destination=None, send_duplicates=False, 
+                                 duplicate_count=3, duplicate_interval=1):
+        device_configs = self.load_all_device_configs()
+        if not device_configs:
+            logger.error("No device configurations found")
+            return 0
+        
+        total_successful = 0
+        
+        for config_data in device_configs:
+            device_name = config_data.get('device_name', config_data.get('device_id', 'Unknown'))
+            logger.info(f"Starting simulation for device: {device_name}")
             
+            events = self.get_events_from_config(config_data)
+            if events:
+                successful = self._run_simulation_with_events(
+                    events, delay, destination, send_duplicates, 
+                    duplicate_count, duplicate_interval
+                )
+                total_successful += successful
+                
+                if config_data != device_configs[-1]: 
+                    logger.info(f"Waiting {delay * 2}s before next device...")
+                    time.sleep(delay * 2)
+            else:
+                logger.warning(f"No events found for device: {device_name}")
+        
+        logger.info(f"All devices simulation complete. Total successful events: {total_successful}")
+        return total_successful
+    
+    def _run_simulation_with_events(self, events, delay=2, destination=None, 
+                                  send_duplicates=False, duplicate_count=3, 
+                                  duplicate_interval=1):
         successful_events = 0
         
         if not self.create_subscription(destination=destination if destination else "http://localhost:5001/events"):
@@ -186,7 +297,8 @@ class RedfishEventSimulator:
             
         logger.info(f"Starting simulation with {len(events)} events")
         for i, event in enumerate(events, 1):
-            logger.info(f"Sending event {i}/{len(events)}")
+            device_id = event.get('DeviceId', 'Unknown')
+            logger.info(f"Sending event {i}/{len(events)} from device {device_id}")
             
             if send_duplicates:
                 successful_events += self.simulate_duplicate_events(
@@ -208,7 +320,12 @@ def main():
     parser = argparse.ArgumentParser(description="Redfish Event Simulator")
     parser.add_argument("--host", default="localhost", help="Redfish emulator host")
     parser.add_argument("--port", type=int, default=5000, help="Redfish emulator port")
-    parser.add_argument("--events", default="events.json", help="Path to events JSON file")
+    parser.add_argument("--mode", choices=["generic", "device", "all"], default="generic",
+                        help="Simulation mode: generic events, specific device, or all devices")
+    parser.add_argument("--events", default="events_generic.json", 
+                        help="Path to generic events JSON file")
+    parser.add_argument("--config", help="Path to device-specific config file (for device mode)")
+    parser.add_argument("--device-id", help="Device ID to assign to generic events")
     parser.add_argument("--delay", type=int, default=2, help="Delay between events in seconds")
     parser.add_argument("--destination", default="http://localhost:5001/events", 
                         help="Destination URL for events")
@@ -223,17 +340,50 @@ def main():
     
     simulator = RedfishEventSimulator(
         emulator_host=args.host,
-        emulator_port=args.port,
-        events_file=args.events
+        emulator_port=args.port
     )
     
-    simulator.run_simulation(
-        delay=args.delay, 
-        destination=args.destination,
-        send_duplicates=args.duplicates,
-        duplicate_count=args.duplicate_count,
-        duplicate_interval=args.duplicate_interval
-    )
+    if args.mode == "generic":
+        if not os.path.exists(args.events):
+            logger.error(f"Generic events file not found: {args.events}")
+            return
+        
+        simulator.run_generic_simulation(
+            events_file=args.events,
+            device_id=args.device_id,
+            delay=args.delay, 
+            destination=args.destination,
+            send_duplicates=args.duplicates,
+            duplicate_count=args.duplicate_count,
+            duplicate_interval=args.duplicate_interval
+        )
+    
+    elif args.mode == "device":
+        if not args.config:
+            logger.error("Device config file must be specified for device mode")
+            return
+        
+        if not os.path.exists(args.config):
+            logger.error(f"Device config file not found: {args.config}")
+            return
+        
+        simulator.run_device_specific_simulation(
+            config_file=args.config,
+            delay=args.delay,
+            destination=args.destination,
+            send_duplicates=args.duplicates,
+            duplicate_count=args.duplicate_count,
+            duplicate_interval=args.duplicate_interval
+        )
+    
+    elif args.mode == "all":
+        simulator.run_all_devices_simulation(
+            delay=args.delay,
+            destination=args.destination,
+            send_duplicates=args.duplicates,
+            duplicate_count=args.duplicate_count,
+            duplicate_interval=args.duplicate_interval
+        )
 
 if __name__ == "__main__":
     main()

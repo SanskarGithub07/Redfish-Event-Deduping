@@ -1,0 +1,45 @@
+{
+  "device_id": "NetworkSwitch-Floor2-SW1",
+  "device_name": "Core Network Switch - Floor 2",
+  "device_type": "NetworkSwitch",
+  "location": "Floor2-NetworkCloset",
+  "default_deduplication_window": 60,
+  "events": [
+    {
+      "EventType": "StatusChange",
+      "Severity": "Warning",
+      "Message": "Port link down detected",
+      "MessageId": "NetworkEvent.1.0.PortLinkDown",
+      "MessageArgs": ["Port24"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/1/NetworkPorts/24"
+      },
+      "DeduplicationTimeWindow": 120,
+      "Actions": ["CheckCabling", "NotifyNetworkAdmin"]
+    },
+    {
+      "EventType": "Alert",
+      "Severity": "Critical",
+      "Message": "High packet loss detected on uplink",
+      "MessageId": "NetworkEvent.1.0.PacketLoss",
+      "MessageArgs": ["Uplink1", "15"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/1/NetworkPorts/1"
+      },
+      "DeduplicationTimeWindow": 300,
+      "Actions": ["NotifyNetworkAdmin", "RerouteTraffic"]
+    },
+    {
+      "EventType": "ResourceUpdated",
+      "Severity": "OK",
+      "Message": "Firmware updated successfully",
+      "MessageId": "UpdateEvent.1.0.FirmwareUpdated",
+      "MessageArgs": ["v2.1.5"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/UpdateService"
+      },
+      "DeduplicationTimeWindow": 0,
+      "Actions": ["LogUpdate", "NotifyAdmin"]
+    }
+  ]
+}

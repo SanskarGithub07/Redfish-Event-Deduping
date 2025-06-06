@@ -1,0 +1,45 @@
+{
+  "device_id": "Server-Rack1-Unit1",
+  "device_name": "Development Server - Rack 1 Unit 1",
+  "device_type": "Server",
+  "location": "DataCenter-A-Rack1",
+  "default_deduplication_window": 120,
+  "events": [
+    {
+      "EventType": "Alert",
+      "Severity": "Critical",
+      "Message": "Memory error detected in DIMM slot",
+      "MessageId": "MemoryEvent.1.0.MemoryError",
+      "MessageArgs": ["DIMM_A1"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/Systems/1/Memory/1"
+      },
+      "DeduplicationTimeWindow": 600,
+      "Actions": ["NotifyAdmin", "LogError"]
+    },
+    {
+      "EventType": "StatusChange",
+      "Severity": "OK",
+      "Message": "Network interface link is up",
+      "MessageId": "NetworkEvent.1.0.LinkUp",
+      "MessageArgs": ["eth0"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/Systems/1/EthernetInterfaces/1"
+      },
+      "DeduplicationTimeWindow": 30,
+      "Actions": ["UpdateNetworkStatus"]
+    },
+    {
+      "EventType": "Alert",
+      "Severity": "Warning", 
+      "Message": "CPU utilization exceeds threshold",
+      "MessageId": "ProcessorEvent.1.0.UtilizationThreshold",
+      "MessageArgs": ["CPU0", "85"],
+      "OriginOfCondition": {
+        "@odata.id": "/redfish/v1/Systems/1/Processors/1"
+      },
+      "DeduplicationTimeWindow": 240,
+      "Actions": ["MonitorCPU", "LogPerformance"]
+    }
+  ]
+}
