@@ -6,6 +6,10 @@ import glob
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import threading
+import csv
+from collections import defaultdict
+import matplotlib.pyplot as plt
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +23,30 @@ event_cache = {}
 cache_lock = threading.Lock()
 device_configs = {}
 configs_lock = threading.Lock()
+
+benchmark_data = []
+benchmark_lock = threading.Lock()
+processing_times = defaultdict(list)
+duplicate_detection_times = []
+
+def record_benchmark_data(event_id, device_id, event_type, message_id, 
+                         arrival_time, processing_start, processing_end, 
+                         is_duplicate, duplicate_check_time):
+    """Record benchmark data for analysis"""
+    with benchmark_lock:
+        benchmark_data.append({
+            'event_id': event_id,
+            'device_id': device_id,
+            'event_type': event_type,
+            'message_id': message_id,
+            'arrival_time': arrival_time,
+            'processing_start': processing_start,
+            'processing_end': processing_end,
+            'total_processing_time': processing_end - processing_start,
+            'is_duplicate': is_duplicate,
+            'duplicate_check_time': duplicate_check_time,
+            'timestamp': datetime.now().isoformat()
+        })
 
 def load_device_configs():
     global device_configs
@@ -57,7 +85,6 @@ def get_deduplication_window(event, device_config=None):
     return 0
 
 def get_event_actions(event, device_config=None):
-    """Get actions for an event, considering device-specific config"""
     if 'Actions' in event:
         return event['Actions']
     
@@ -91,9 +118,13 @@ def generate_event_key(event):
     return "|".join(key_elements)
 
 def is_duplicate_event(event, device_config=None):
+    duplicate_check_start = time.time()
+    
     dedup_window = get_deduplication_window(event, device_config)
     
     if dedup_window <= 0:
+        duplicate_check_end = time.time()
+        duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
         return False
     
     event_key = generate_event_key(event)
@@ -106,6 +137,8 @@ def is_duplicate_event(event, device_config=None):
             
             if time_diff.total_seconds() < dedup_window:
                 last_event["count"] += 1
+                duplicate_check_end = time.time()
+                duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
                 logger.info(f"Duplicate event detected for device {event.get('DeviceId', 'Unknown')}. Count: {last_event['count']}")
                 return True
         
@@ -114,6 +147,8 @@ def is_duplicate_event(event, device_config=None):
             "count": 1,
             "device_id": event.get('DeviceId', 'Unknown')
         }
+        duplicate_check_end = time.time()
+        duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
         return False
 
 def clean_event_cache():
@@ -177,6 +212,8 @@ def execute_actions(actions, event_data, device_config=None):
 
 @app.route('/events', methods=['POST'])
 def receive_event():
+    arrival_time = time.time()  
+    
     if not request.is_json:
         logger.error("Received non-JSON request")
         return jsonify({"error": "Content type must be application/json"}), 400
@@ -187,8 +224,10 @@ def receive_event():
     
     if 'Events' in event_data:
         for event in event_data['Events']:
+            event['_arrival_time'] = arrival_time  
             process_event(event)
     elif 'EventType' in event_data:
+        event_data['_arrival_time'] = arrival_time  
         process_event(event_data)
     else:
         logger.warning("Unknown event format received")
@@ -198,12 +237,16 @@ def receive_event():
     return jsonify({"status": "success", "message": "Event received"}), 200
 
 def process_event(event):
+    processing_start = time.time()
+    arrival_time = time.time()  
+    
     event_type = event.get('EventType', 'Unknown')
     message_id = event.get('MessageId', event.get('MessageID', 'Unknown'))
     severity = event.get('Severity', 'Unknown')
     message = event.get('Message', 'No message provided')
     origin = event.get('OriginOfCondition', {})
     device_id = event.get('DeviceId', 'Unknown')
+    event_id = event.get('EventId', f"{device_id}_{message_id}_{int(time.time())}")
     
     device_config = get_device_config(device_id)
     
@@ -228,7 +271,20 @@ def process_event(event):
     if origin:
         logger.info(f"Origin: {json.dumps(origin, indent=2)}")
     
-    if is_duplicate_event(event, device_config):
+    duplicate_check_start = time.time()
+    is_duplicate = is_duplicate_event(event, device_config)
+    duplicate_check_end = time.time()
+    duplicate_check_time = duplicate_check_end - duplicate_check_start
+    
+    processing_end = time.time()
+    
+    record_benchmark_data(
+        event_id, device_id, event_type, message_id,
+        arrival_time, processing_start, processing_end,
+        is_duplicate, duplicate_check_time
+    )
+    
+    if is_duplicate:
         logger.info(f"Skipping duplicate event from {device_id} (dedup window: {dedup_window}s)")
         return
     
@@ -264,7 +320,6 @@ def list_devices():
 
 @app.route('/devices/<device_id>', methods=['GET'])
 def get_device_info(device_id):
-    """Get information about a specific device"""
     device_config = get_device_config(device_id)
     
     if not device_config:
@@ -314,6 +369,85 @@ def reload_configs():
             "status": "error",
             "message": f"Failed to reload configs: {str(e)}"
         }), 500
+        
+@app.route('/benchmark/data', methods=['GET'])
+def get_benchmark_data():
+    with benchmark_lock:
+        return jsonify({
+            "total_events": len(benchmark_data),
+            "benchmark_data": benchmark_data,
+            "duplicate_detection_times": duplicate_detection_times
+        }), 200
+
+@app.route('/benchmark/export', methods=['GET'])
+def export_benchmark_data():
+    if not benchmark_data:
+        return jsonify({"error": "No benchmark data available"}), 404
+    
+    filename = f"benchmark_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    with benchmark_lock:
+        with open(filename, 'w', newline='') as csvfile:
+            fieldnames = ['event_id', 'device_id', 'event_type', 'message_id', 
+                         'arrival_time', 'processing_start', 'processing_end',
+                         'total_processing_time', 'is_duplicate', 'duplicate_check_time', 'timestamp']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(benchmark_data)
+    
+    return jsonify({
+        "status": "success",
+        "message": f"Benchmark data exported to {filename}",
+        "filename": filename,
+        "records": len(benchmark_data)
+    }), 200
+
+@app.route('/benchmark/clear', methods=['POST'])
+def clear_benchmark_data():
+    with benchmark_lock:
+        count = len(benchmark_data)
+        benchmark_data.clear()
+        duplicate_detection_times.clear()
+        processing_times.clear()
+    
+    return jsonify({
+        "status": "success",
+        "message": f"Cleared {count} benchmark records"
+    }), 200
+
+@app.route('/benchmark/stats', methods=['GET'])
+def get_benchmark_stats():
+    if not benchmark_data:
+        return jsonify({"error": "No benchmark data available"}), 404
+    
+    with benchmark_lock:
+        total_events = len(benchmark_data)
+        duplicate_events = sum(1 for event in benchmark_data if event['is_duplicate'])
+        unique_events = total_events - duplicate_events
+        
+        processing_times = [event['total_processing_time'] for event in benchmark_data]
+        duplicate_check_times = [event['duplicate_check_time'] for event in benchmark_data]
+        
+        stats = {
+            "total_events": total_events,
+            "unique_events": unique_events,
+            "duplicate_events": duplicate_events,
+            "duplicate_rate": (duplicate_events / total_events) * 100 if total_events > 0 else 0,
+            "processing_time_stats": {
+                "min": min(processing_times) if processing_times else 0,
+                "max": max(processing_times) if processing_times else 0,
+                "avg": sum(processing_times) / len(processing_times) if processing_times else 0,
+                "median": sorted(processing_times)[len(processing_times)//2] if processing_times else 0
+            },
+            "duplicate_check_time_stats": {
+                "min": min(duplicate_check_times) if duplicate_check_times else 0,
+                "max": max(duplicate_check_times) if duplicate_check_times else 0,
+                "avg": sum(duplicate_check_times) / len(duplicate_check_times) if duplicate_check_times else 0,
+                "median": sorted(duplicate_check_times)[len(duplicate_check_times)//2] if duplicate_check_times else 0
+            }
+        }
+    
+    return jsonify(stats), 200
 
 if __name__ == '__main__':
     try:

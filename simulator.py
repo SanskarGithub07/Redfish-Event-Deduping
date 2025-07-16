@@ -8,6 +8,11 @@ import os
 import glob
 import random
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import numpy as np
+from datetime import datetime
+import pandas as pd
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -547,6 +552,246 @@ class RedfishEventSimulator:
                 
         logger.info(f"Simulation complete. Successfully sent {successful_events} events")
         return successful_events
+    
+    def collect_benchmark_data(self, receiver_url="http://localhost:5001"):
+        try:
+            response = requests.get(f"{receiver_url}/benchmark/data")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Failed to collect benchmark data: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error collecting benchmark data: {str(e)}")
+            return None
+    
+    def clear_benchmark_data(self, receiver_url="http://localhost:5001"):
+        try:
+            response = requests.post(f"{receiver_url}/benchmark/clear")
+            if response.status_code == 200:
+                logger.info("Benchmark data cleared successfully")
+                return True
+            else:
+                logger.error(f"Failed to clear benchmark data: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error clearing benchmark data: {str(e)}")
+            return False
+        
+    def export_benchmark_data(self, receiver_url="http://localhost:5001"):
+        try:
+            response = requests.get(f"{receiver_url}/benchmark/export")
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Benchmark data exported: {result['filename']}")
+                return result['filename']
+            else:
+                logger.error(f"Failed to export benchmark data: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error exporting benchmark data: {str(e)}")
+            return None
+        
+    def generate_benchmark_plots(self, benchmark_data, mode_name, output_dir="benchmark_plots"):
+        import os
+        
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        data = benchmark_data.get('benchmark_data', [])
+        if not data:
+            logger.warning("No benchmark data available for plotting")
+            return
+        
+        df = pd.DataFrame(data)
+        
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        fig.suptitle(f'Benchmark Analysis - {mode_name.title()} Mode', fontsize=16)
+        
+        processing_times = df['total_processing_time'] * 1000  
+        axes[0, 0].hist(processing_times, bins=30, alpha=0.7, color='blue', edgecolor='black')
+        axes[0, 0].set_title('Processing Time Distribution')
+        axes[0, 0].set_xlabel('Processing Time (ms)')
+        axes[0, 0].set_ylabel('Frequency')
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        duplicate_check_times = df['duplicate_check_time'] * 1000  
+        axes[0, 1].hist(duplicate_check_times, bins=30, alpha=0.7, color='green', edgecolor='black')
+        axes[0, 1].set_title('Duplicate Check Time Distribution')
+        axes[0, 1].set_xlabel('Duplicate Check Time (ms)')
+        axes[0, 1].set_ylabel('Frequency')
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        device_counts = df['device_id'].value_counts()
+        axes[0, 2].bar(range(len(device_counts)), device_counts.values, color='orange', alpha=0.7)
+        axes[0, 2].set_title('Events by Device')
+        axes[0, 2].set_xlabel('Device Index')
+        axes[0, 2].set_ylabel('Event Count')
+        axes[0, 2].set_xticks(range(len(device_counts)))
+        axes[0, 2].set_xticklabels([f"Dev{i+1}" for i in range(len(device_counts))], rotation=45)
+        axes[0, 2].grid(True, alpha=0.3)
+        
+        duplicate_counts = df['is_duplicate'].value_counts()
+        labels = ['Unique', 'Duplicate']
+        colors = ['lightblue', 'lightcoral']
+        axes[1, 0].pie(duplicate_counts.values, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+        axes[1, 0].set_title('Duplicate vs Unique Events')
+        
+        df['event_index'] = range(len(df))
+        axes[1, 1].plot(df['event_index'], processing_times, marker='o', markersize=2, alpha=0.6)
+        axes[1, 1].set_title('Processing Time Over Time')
+        axes[1, 1].set_xlabel('Event Index')
+        axes[1, 1].set_ylabel('Processing Time (ms)')
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        event_types = df['event_type'].unique()
+        processing_by_type = [df[df['event_type'] == et]['total_processing_time'] * 1000 for et in event_types]
+        axes[1, 2].boxplot(processing_by_type, labels=event_types)
+        axes[1, 2].set_title('Processing Time by Event Type')
+        axes[1, 2].set_xlabel('Event Type')
+        axes[1, 2].set_ylabel('Processing Time (ms)')
+        axes[1, 2].tick_params(axis='x', rotation=45)
+        axes[1, 2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{output_dir}/benchmark_{mode_name}_{timestamp}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        logger.info(f"Benchmark plots saved to: {filename}")
+        
+        self._save_detailed_plots(df, mode_name, output_dir, timestamp)
+        
+        plt.show()
+        return filename
+    
+    def _save_detailed_plots(self, df, mode_name, output_dir, timestamp):
+        
+        plt.figure(figsize=(12, 8))
+        plt.subplot(2, 2, 1)
+        processing_times = df['total_processing_time'] * 1000
+        plt.hist(processing_times, bins=50, alpha=0.7, color='blue', edgecolor='black')
+        plt.title('Detailed Processing Time Distribution')
+        plt.xlabel('Processing Time (ms)')
+        plt.ylabel('Frequency')
+        plt.grid(True, alpha=0.3)
+        
+        plt.subplot(2, 2, 2)
+        duplicate_times = df[df['is_duplicate'] == True]['total_processing_time'] * 1000
+        unique_times = df[df['is_duplicate'] == False]['total_processing_time'] * 1000
+        plt.hist([unique_times, duplicate_times], bins=30, alpha=0.7, 
+                color=['blue', 'red'], label=['Unique', 'Duplicate'], edgecolor='black')
+        plt.title('Processing Time: Unique vs Duplicate')
+        plt.xlabel('Processing Time (ms)')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.subplot(2, 2, 3)
+        plt.scatter(df['duplicate_check_time'] * 1000, df['total_processing_time'] * 1000, alpha=0.6)
+        plt.title('Duplicate Check Time vs Total Processing Time')
+        plt.xlabel('Duplicate Check Time (ms)')
+        plt.ylabel('Total Processing Time (ms)')
+        plt.grid(True, alpha=0.3)
+        
+        plt.subplot(2, 2, 4)
+        device_processing_times = df.groupby('device_id')['total_processing_time'].mean() * 1000
+        plt.bar(range(len(device_processing_times)), device_processing_times.values, alpha=0.7, color='orange')
+        plt.title('Average Processing Time by Device')
+        plt.xlabel('Device')
+        plt.ylabel('Average Processing Time (ms)')
+        plt.xticks(range(len(device_processing_times)), 
+                [f"Dev{i+1}" for i in range(len(device_processing_times))], rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        filename = f"{output_dir}/detailed_benchmark_{mode_name}_{timestamp}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        logger.info(f"Detailed benchmark plots saved to: {filename}")
+        plt.close()
+        
+    def run_benchmarked_simulation(self, mode, **kwargs):
+        receiver_url = kwargs.get('destination', 'http://localhost:5001').replace('/events', '')
+        
+        self.clear_benchmark_data(receiver_url)
+        
+        logger.info(f"Starting benchmarked simulation in {mode} mode")
+        start_time = time.time()
+        
+        if mode == "generic":
+            result = self.run_generic_simulation(**kwargs)
+        elif mode == "device":
+            result = self.run_device_specific_simulation(**kwargs)
+        elif mode == "all":
+            result = self.run_all_devices_simulation(**kwargs)
+        elif mode == "mixed":
+            result = self.run_mixed_simulation(**kwargs)
+        elif mode == "realistic":
+            result = self.run_realistic_scenario(**kwargs)
+        else:
+            logger.error(f"Unknown simulation mode: {mode}")
+            return None
+        
+        end_time = time.time()
+        total_duration = end_time - start_time
+        
+        time.sleep(2)
+        
+        benchmark_data = self.collect_benchmark_data(receiver_url)
+        
+        if benchmark_data:
+            logger.info(f"Simulation completed in {total_duration:.2f} seconds")
+            logger.info(f"Total events sent: {result}")
+            logger.info(f"Total events processed: {benchmark_data.get('total_events', 0)}")
+            
+            # plot_filename = self.generate_benchmark_plots(benchmark_data, mode)
+            
+            # csv_filename = self.export_benchmark_data(receiver_url)
+            
+            self._print_benchmark_summary(benchmark_data, mode, total_duration)
+            
+            return {
+                'simulation_result': result,
+                'benchmark_data': benchmark_data,
+                # 'plot_filename': plot_filename,
+                # 'csv_filename': csv_filename,
+                'total_duration': total_duration
+            }
+        else:
+            logger.error("Failed to collect benchmark data")
+            return None
+        
+    def _print_benchmark_summary(self, benchmark_data, mode, total_duration):
+        data = benchmark_data.get('benchmark_data', [])
+        if not data:
+            return
+        
+        df = pd.DataFrame(data)
+        
+        total_events = len(df)
+        duplicate_events = df['is_duplicate'].sum()
+        unique_events = total_events - duplicate_events
+        
+        avg_processing_time = df['total_processing_time'].mean() * 1000
+        avg_duplicate_check_time = df['duplicate_check_time'].mean() * 1000
+        
+        max_processing_time = df['total_processing_time'].max() * 1000
+        min_processing_time = df['total_processing_time'].min() * 1000
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"BENCHMARK SUMMARY - {mode.upper()} MODE")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total Simulation Duration: {total_duration:.2f} seconds")
+        logger.info(f"Total Events Processed: {total_events}")
+        logger.info(f"Unique Events: {unique_events}")
+        logger.info(f"Duplicate Events: {duplicate_events}")
+        logger.info(f"Duplicate Rate: {(duplicate_events/total_events)*100:.1f}%")
+        logger.info(f"Average Processing Time: {avg_processing_time:.3f} ms")
+        logger.info(f"Average Duplicate Check Time: {avg_duplicate_check_time:.3f} ms")
+        logger.info(f"Min Processing Time: {min_processing_time:.3f} ms")
+        logger.info(f"Max Processing Time: {max_processing_time:.3f} ms")
+        logger.info(f"Events Per Second: {total_events/total_duration:.2f}")
+        logger.info(f"{'='*60}\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Redfish Event Simulator")
@@ -595,6 +840,11 @@ def main():
                         help="Minimum frequency between batches in realistic mode")
     parser.add_argument("--batch-frequency-max", type=int, default=20,
                         help="Maximum frequency between batches in realistic mode")
+  
+    parser.add_argument("--benchmark", action="store_true",
+                        help="Enable benchmarking and generate plots")
+    parser.add_argument("--benchmark-output", default="benchmark_plots",
+                        help="Directory for benchmark output files")
     
     args = parser.parse_args()
     
@@ -603,102 +853,151 @@ def main():
         emulator_port=args.port
     )
     
+    sim_kwargs = {
+        'delay': args.delay,
+        'destination': args.destination,
+        'send_duplicates': args.duplicates,
+        'duplicate_count': args.duplicate_count,
+        'duplicate_interval': args.duplicate_interval
+    }
+    
+    # Add mode-specific parameters
     if args.mode == "generic":
-        if not os.path.exists(args.events):
-            logger.error(f"Generic events file not found: {args.events}")
-            return
-        
-        simulator.run_generic_simulation(
-            events_file=args.events,
-            device_id=args.device_id,
-            delay=args.delay, 
-            destination=args.destination,
-            send_duplicates=args.duplicates,
-            duplicate_count=args.duplicate_count,
-            duplicate_interval=args.duplicate_interval
-        )
-    
+        sim_kwargs.update({
+            'events_file': args.events,
+            'device_id': args.device_id
+        })
     elif args.mode == "device":
-        if not args.config:
-            logger.error("Device config file must be specified for device mode")
-            return
+        sim_kwargs.update({
+            'config_file': args.config
+        })
+    elif args.mode in ["mixed", "realistic"]:
+        sim_kwargs.update({
+            'events_file': args.events,
+            'device_id': args.device_id,
+            'config_file': args.config,
+            'use_all_devices': args.use_all_devices
+        })
         
-        if not os.path.exists(args.config):
-            logger.error(f"Device config file not found: {args.config}")
-            return
-        
-        simulator.run_device_specific_simulation(
-            config_file=args.config,
-            delay=args.delay,
-            destination=args.destination,
-            send_duplicates=args.duplicates,
-            duplicate_count=args.duplicate_count,
-            duplicate_interval=args.duplicate_interval
-        )
+        if args.mode == "mixed":
+            sim_kwargs.update({
+                'batch_size': args.batch_size,
+                'duplicate_probability': args.duplicate_probability,
+                'duplicate_count_range': (args.duplicate_count_min, args.duplicate_count_max),
+                'time_spread_range': (args.time_spread_min, args.time_spread_max),
+                'num_batches': args.num_batches,
+                'batch_interval_range': (args.batch_interval_min, args.batch_interval_max)
+            })
+        elif args.mode == "realistic":
+            sim_kwargs.update({
+                'scenario_duration': args.scenario_duration,
+                'batch_frequency_range': (args.batch_frequency_min, args.batch_frequency_max),
+                'duplicate_probability': args.duplicate_probability
+            })
     
-    elif args.mode == "all":
-        simulator.run_all_devices_simulation(
-            delay=args.delay,
-            destination=args.destination,
-            send_duplicates=args.duplicates,
-            duplicate_count=args.duplicate_count,
-            duplicate_interval=args.duplicate_interval
-        )
-    
-    elif args.mode == "mixed":
-        if args.use_all_devices:
-            device_configs = simulator.load_all_device_configs()
-            if not device_configs:
-                logger.error("No device configurations found. Cannot use --use-all-devices option.")
-                return
-        elif args.config:
-            if not os.path.exists(args.config):
-                logger.error(f"Device config file not found: {args.config}")
-                return
-        else:
+    # Run simulation with or without benchmarking
+    if args.benchmark:
+        result = simulator.run_benchmarked_simulation(args.mode, **sim_kwargs)
+        if result:
+            # logger.info(f"Benchmarking complete. Results saved to {args.benchmark_output}")
+            logger.info("Benchmarking complete.")
+    else:
+        if args.mode == "generic":
             if not os.path.exists(args.events):
                 logger.error(f"Generic events file not found: {args.events}")
                 return
+            
+            simulator.run_generic_simulation(
+                events_file=args.events,
+                device_id=args.device_id,
+                delay=args.delay, 
+                destination=args.destination,
+                send_duplicates=args.duplicates,
+                duplicate_count=args.duplicate_count,
+                duplicate_interval=args.duplicate_interval
+            )
         
-        simulator.run_mixed_simulation(
-            events_file=args.events,
-            device_id=args.device_id,
-            config_file=args.config,
-            use_all_devices=args.use_all_devices,
-            destination=args.destination,
-            batch_size=args.batch_size,
-            duplicate_probability=args.duplicate_probability,
-            duplicate_count_range=(args.duplicate_count_min, args.duplicate_count_max),
-            time_spread_range=(args.time_spread_min, args.time_spread_max),
-            num_batches=args.num_batches,
-            batch_interval_range=(args.batch_interval_min, args.batch_interval_max)
-        )
-    
-    elif args.mode == "realistic":
-        if args.use_all_devices:
-            device_configs = simulator.load_all_device_configs()
-            if not device_configs:
-                logger.error("No device configurations found. Cannot use --use-all-devices option.")
+        elif args.mode == "device":
+            if not args.config:
+                logger.error("Device config file must be specified for device mode")
                 return
-        elif args.config:
+            
             if not os.path.exists(args.config):
                 logger.error(f"Device config file not found: {args.config}")
                 return
-        else:
-            if not os.path.exists(args.events):
-                logger.error(f"Generic events file not found: {args.events}")
-                return
+            
+            simulator.run_device_specific_simulation(
+                config_file=args.config,
+                delay=args.delay,
+                destination=args.destination,
+                send_duplicates=args.duplicates,
+                duplicate_count=args.duplicate_count,
+                duplicate_interval=args.duplicate_interval
+            )
         
-        simulator.run_realistic_scenario(
-            events_file=args.events,
-            device_id=args.device_id,
-            config_file=args.config,
-            use_all_devices=args.use_all_devices,
-            destination=args.destination,
-            scenario_duration=args.scenario_duration,
-            batch_frequency_range=(args.batch_frequency_min, args.batch_frequency_max),
-            duplicate_probability=args.duplicate_probability
-        )
+        elif args.mode == "all":
+            simulator.run_all_devices_simulation(
+                delay=args.delay,
+                destination=args.destination,
+                send_duplicates=args.duplicates,
+                duplicate_count=args.duplicate_count,
+                duplicate_interval=args.duplicate_interval
+            )
+        
+        elif args.mode == "mixed":
+            if args.use_all_devices:
+                device_configs = simulator.load_all_device_configs()
+                if not device_configs:
+                    logger.error("No device configurations found. Cannot use --use-all-devices option.")
+                    return
+            elif args.config:
+                if not os.path.exists(args.config):
+                    logger.error(f"Device config file not found: {args.config}")
+                    return
+            else:
+                if not os.path.exists(args.events):
+                    logger.error(f"Generic events file not found: {args.events}")
+                    return
+            
+            simulator.run_mixed_simulation(
+                events_file=args.events,
+                device_id=args.device_id,
+                config_file=args.config,
+                use_all_devices=args.use_all_devices,
+                destination=args.destination,
+                batch_size=args.batch_size,
+                duplicate_probability=args.duplicate_probability,
+                duplicate_count_range=(args.duplicate_count_min, args.duplicate_count_max),
+                time_spread_range=(args.time_spread_min, args.time_spread_max),
+                num_batches=args.num_batches,
+                batch_interval_range=(args.batch_interval_min, args.batch_interval_max)
+            )
+        
+        elif args.mode == "realistic":
+            if args.use_all_devices:
+                device_configs = simulator.load_all_device_configs()
+                if not device_configs:
+                    logger.error("No device configurations found. Cannot use --use-all-devices option.")
+                    return
+            elif args.config:
+                if not os.path.exists(args.config):
+                    logger.error(f"Device config file not found: {args.config}")
+                    return
+            else:
+                if not os.path.exists(args.events):
+                    logger.error(f"Generic events file not found: {args.events}")
+                    return
+            
+            simulator.run_realistic_scenario(
+                events_file=args.events,
+                device_id=args.device_id,
+                config_file=args.config,
+                use_all_devices=args.use_all_devices,
+                destination=args.destination,
+                scenario_duration=args.scenario_duration,
+                batch_frequency_range=(args.batch_frequency_min, args.batch_frequency_max),
+                duplicate_probability=args.duplicate_probability
+            )
 
 if __name__ == "__main__":
     main()
