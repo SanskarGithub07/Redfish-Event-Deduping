@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-event_cache = {}
-cache_lock = threading.Lock()
+# event_cache = {}
+# cache_lock = threading.Lock()
+
+import redis
+
+redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
 device_configs = {}
 configs_lock = threading.Lock()
 
@@ -102,7 +107,7 @@ def get_event_actions(event, device_config=None):
 def generate_event_key(event):
     message_id = event.get('MessageId', event.get('MessageID', 'Unknown'))
     event_type = event.get('EventType', 'Unknown')
-    device_id = event.get('DeviceId', 'Unknown')
+    device_id = event.get('device_id', 'Unknown')
     severity = event.get('Severity', 'Unknown')
     
     origin = event.get('OriginOfCondition', {})
@@ -119,59 +124,102 @@ def generate_event_key(event):
 
 def is_duplicate_event(event, device_config=None):
     duplicate_check_start = time.time()
-    
+
     dedup_window = get_deduplication_window(event, device_config)
-    
+
     if dedup_window <= 0:
         duplicate_check_end = time.time()
         duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
         return False
-    
+
     event_key = generate_event_key(event)
     current_time = datetime.now()
+    timestamp_now = current_time.isoformat()
+
+    existing = redis_client.hgetall(event_key)
+
+    if existing:
+        last_timestamp = datetime.fromisoformat(existing.get("timestamp", timestamp_now))
+        time_diff = current_time - last_timestamp
+
+        if time_diff.total_seconds() < dedup_window:
+            redis_client.hincrby(event_key, "count", 1)
+            duplicate_check_end = time.time()
+            duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
+            logger.info(f"Duplicate event detected for device {event.get('device_id', 'Unknown')}. Count: {int(existing.get('count', 1)) + 1}")
+            return True
+
+    # Not a duplicate — store in Redis
+    redis_client.hset(event_key, mapping={
+        "timestamp": timestamp_now,
+        "count": 1,
+        "device_id": event.get("device_id", "Unknown")
+    })
+    redis_client.expire(event_key, int(dedup_window))  # auto-expire after deduplication window
+
+    duplicate_check_end = time.time()
+    duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
+    return False
+
+
+# def is_duplicate_event(event, device_config=None):
+#     duplicate_check_start = time.time()
     
-    with cache_lock:
-        if event_key in event_cache:
-            last_event = event_cache[event_key]
-            time_diff = current_time - last_event["timestamp"]
+#     dedup_window = get_deduplication_window(event, device_config)
+    
+#     if dedup_window <= 0:
+#         duplicate_check_end = time.time()
+#         duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
+#         return False
+    
+#     event_key = generate_event_key(event)
+#     current_time = datetime.now()
+    
+#     with cache_lock:
+#         if event_key in event_cache:
+#             last_event = event_cache[event_key]
+#             time_diff = current_time - last_event["timestamp"]
             
-            if time_diff.total_seconds() < dedup_window:
-                last_event["count"] += 1
-                duplicate_check_end = time.time()
-                duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
-                logger.info(f"Duplicate event detected for device {event.get('DeviceId', 'Unknown')}. Count: {last_event['count']}")
-                return True
+#             if time_diff.total_seconds() < dedup_window:
+#                 last_event["count"] += 1
+#                 duplicate_check_end = time.time()
+#                 duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
+#                 logger.info(f"Duplicate event detected for device {event.get('device_id', 'Unknown')}. Count: {last_event['count']}")
+#                 return True
         
-        event_cache[event_key] = {
-            "timestamp": current_time,
-            "count": 1,
-            "device_id": event.get('DeviceId', 'Unknown')
-        }
-        duplicate_check_end = time.time()
-        duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
-        return False
+#         event_cache[event_key] = {
+#             "timestamp": current_time,
+#             "count": 1,
+#             "device_id": event.get('device_id', 'Unknown')
+#         }
+#         duplicate_check_end = time.time()
+#         duplicate_detection_times.append(duplicate_check_end - duplicate_check_start)
+#         return False
 
 def clean_event_cache():
-    current_time = datetime.now()
-    to_remove = []
+    logger.info("Redis handles cache expiry automatically.")
+
+# def clean_event_cache():
+#     current_time = datetime.now()
+#     to_remove = []
     
-    with cache_lock:
-        for key, event_data in event_cache.items():
-            if (current_time - event_data["timestamp"]).total_seconds() > 3600:
-                to_remove.append(key)
+#     with cache_lock:
+#         for key, event_data in event_cache.items():
+#             if (current_time - event_data["timestamp"]).total_seconds() > 3600:
+#                 to_remove.append(key)
         
-        for key in to_remove:
-            del event_cache[key]
+#         for key in to_remove:
+#             del event_cache[key]
     
-    if to_remove:
-        logger.info(f"Cleaned {len(to_remove)} expired events from cache")
+#     if to_remove:
+#         logger.info(f"Cleaned {len(to_remove)} expired events from cache")
 
 def execute_actions(actions, event_data, device_config=None):
     if not actions:
         logger.info("No actions specified for this event")
         return
     
-    device_id = event_data.get('DeviceId', 'Unknown')
+    device_id = event_data.get('device_id', 'Unknown')
     device_name = device_config.get('device_name', device_id) if device_config else device_id
     
     logger.info(f"Executing actions for device {device_name}: {', '.join(actions)}")
@@ -245,7 +293,7 @@ def process_event(event):
     severity = event.get('Severity', 'Unknown')
     message = event.get('Message', 'No message provided')
     origin = event.get('OriginOfCondition', {})
-    device_id = event.get('DeviceId', 'Unknown')
+    device_id = event.get('device_id', 'Unknown')
     event_id = event.get('EventId', f"{device_id}_{message_id}_{int(time.time())}")
     
     device_config = get_device_config(device_id)
@@ -290,14 +338,26 @@ def process_event(event):
     
     execute_actions(actions, event, device_config)
 
+# @app.route('/health', methods=['GET'])
+# def health_check():
+#     return jsonify({
+#         "status": "up", 
+#         "service": "Redfish Event Receiver",
+#         "cache_size": len(event_cache),
+#         "configured_devices": len(device_configs)
+#     }), 200
+
 @app.route('/health', methods=['GET'])
 def health_check():
+    cache_keys = redis_client.keys('*')
+    
     return jsonify({
         "status": "up", 
         "service": "Redfish Event Receiver",
-        "cache_size": len(event_cache),
+        "cache_size": len(cache_keys),
         "configured_devices": len(device_configs)
     }), 200
+
 
 @app.route('/devices', methods=['GET'])
 def list_devices():
@@ -327,34 +387,74 @@ def get_device_info(device_id):
     
     return jsonify(device_config), 200
 
+# @app.route('/cache', methods=['GET'])
+# def view_cache():
+#     cache_view = {}
+    
+#     with cache_lock:
+#         for key, data in event_cache.items():
+#             cache_view[key] = {
+#                 "timestamp": data["timestamp"].isoformat(),
+#                 "count": data["count"],
+#                 "device_id": data.get("device_id", "Unknown"),
+#                 "age_seconds": (datetime.now() - data["timestamp"]).total_seconds()
+#             }
+    
+#     return jsonify({
+#         "cache_size": len(cache_view),
+#         "entries": cache_view
+#     }), 200
+    
 @app.route('/cache', methods=['GET'])
 def view_cache():
     cache_view = {}
-    
-    with cache_lock:
-        for key, data in event_cache.items():
+
+    keys = redis_client.keys('*')
+    for key in keys:
+        data = redis_client.hgetall(key)
+        if "timestamp" in data:
+            try:
+                timestamp_dt = datetime.fromisoformat(data["timestamp"])
+                age_seconds = (datetime.now() - timestamp_dt).total_seconds()
+            except Exception as e:
+                logger.warning(f"Invalid timestamp format for key {key}: {e}")
+                age_seconds = -1
+
             cache_view[key] = {
-                "timestamp": data["timestamp"].isoformat(),
-                "count": data["count"],
+                "timestamp": data["timestamp"],
+                "count": int(data.get("count", 0)),
                 "device_id": data.get("device_id", "Unknown"),
-                "age_seconds": (datetime.now() - data["timestamp"]).total_seconds()
+                "age_seconds": age_seconds
             }
-    
+
     return jsonify({
         "cache_size": len(cache_view),
         "entries": cache_view
     }), 200
 
+
+# @app.route('/cache/clear', methods=['POST'])
+# def clear_cache():
+#     with cache_lock:
+#         size = len(event_cache)
+#         event_cache.clear()
+    
+#     return jsonify({
+#         "status": "success",
+#         "message": f"Cleared {size} entries from cache"
+#     }), 200
+    
 @app.route('/cache/clear', methods=['POST'])
 def clear_cache():
-    with cache_lock:
-        size = len(event_cache)
-        event_cache.clear()
-    
+    keys = redis_client.keys('*')
+    for key in keys:
+        redis_client.delete(key)
+
     return jsonify({
         "status": "success",
-        "message": f"Cleared {size} entries from cache"
+        "message": f"Cleared {len(keys)} entries from cache"
     }), 200
+
 
 @app.route('/configs/reload', methods=['POST'])
 def reload_configs():
