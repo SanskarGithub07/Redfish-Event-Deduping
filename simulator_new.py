@@ -4,6 +4,8 @@ import requests
 import time
 import uuid
 import argparse
+import sys
+import io
 import os
 import glob
 import random
@@ -17,16 +19,13 @@ class RedfishEventSimulator:
         self.emulator_base_url = f"http://{emulator_host}:{emulator_port}"
         self.subscription_id = None
         self.subscription_url = None
-        self.logger = simulator_logger # Use the module-level logger by default
-
+        self.logger = logging.getLogger(__name__)  # Get the module logger
+        
+        # Don't modify handlers here - let the root logger configuration handle it
         if log_handler:
-            # If a specific log handler is provided (e.g., for Streamlit),
-            # remove existing handlers and add the new one.
-            # This prevents duplicate log messages if simulator_logger already has handlers.
-            for h in list(self.logger.handlers):
-                self.logger.removeHandler(h)
+            # Only add the handler if specifically requested
             self.logger.addHandler(log_handler)
-            self.logger.setLevel(logging.INFO) # Ensure the level is set for the new handler
+            self.logger.setLevel(logging.INFO)
 
 
     def load_generic_events(self, events_file="events_generic.json"):
@@ -575,101 +574,102 @@ class RedfishEventSimulator:
 def run_simulation(mode, **kwargs):
     """
     This function acts as the entry point for running simulations from Streamlit.
-    It handles setting up the logger for Streamlit output.
+    It handles setting up the logger for Streamlit output while maintaining console output.
     """
-    # Create a stringio object to capture logs
-    import io
-    log_capture_string = io.StringIO()
-    ch = logging.StreamHandler(log_capture_string)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    ch.setLevel(logging.INFO) # Set the level for the handler
-
-    # Get the root logger and add our handler
-    # Remove existing handlers to avoid duplicate output if this is called multiple times
+    # Get the root logger
     root_logger = logging.getLogger()
-    for h in list(root_logger.handlers):
-        root_logger.removeHandler(h)
-    root_logger.addHandler(ch)
-    root_logger.setLevel(logging.INFO) # Set the root logger level
+    
+    # Remove all existing handlers to avoid duplicates
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create a stringio object to capture logs for Streamlit
+    log_capture_string = io.StringIO()
+    
+    # Create handler for Streamlit
+    streamlit_handler = logging.StreamHandler(log_capture_string)
+    streamlit_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    streamlit_handler.setLevel(logging.INFO)
+    
+    # Create console handler that outputs to terminal
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    console_handler.setLevel(logging.INFO)
 
-    # Also pass the handler to the simulator's specific logger
-    # We initialize the simulator with the custom handler
+    # Add both handlers to root logger
+    root_logger.addHandler(streamlit_handler)
+    root_logger.addHandler(console_handler)
+    root_logger.setLevel(logging.INFO)
+
+    # Initialize the simulator - don't pass any log_handler to avoid duplicate logs
     simulator = RedfishEventSimulator(
         emulator_host=kwargs.get('host', 'localhost'),
         emulator_port=kwargs.get('port', 5000),
-        log_handler=ch
+        log_handler=None  # No need to pass handler since root logger is configured
     )
 
     result = 0
-    if mode == "generic":
-        result = simulator.run_generic_simulation(
-            events_file=kwargs.get('events'),
-            device_id=kwargs.get('device_id'),
-            delay=kwargs.get('delay'),
-            destination=kwargs.get('destination'),
-            send_duplicates=kwargs.get('duplicates'),
-            duplicate_count=kwargs.get('duplicate_count'),
-            duplicate_interval=kwargs.get('duplicate_interval')
-        )
+    try:
+        if mode == "generic":
+            result = simulator.run_generic_simulation(
+                events_file=kwargs.get('events'),
+                device_id=kwargs.get('device_id'),
+                delay=kwargs.get('delay'),
+                destination=kwargs.get('destination'),
+                send_duplicates=kwargs.get('duplicates'),
+                duplicate_count=kwargs.get('duplicate_count'),
+                duplicate_interval=kwargs.get('duplicate_interval')
+            )
+        elif mode == "device":
+            result = simulator.run_device_specific_simulation(
+                config_file=kwargs.get('config'),
+                delay=kwargs.get('delay'),
+                destination=kwargs.get('destination'),
+                send_duplicates=kwargs.get('duplicates'),
+                duplicate_count=kwargs.get('duplicate_count'),
+                duplicate_interval=kwargs.get('duplicate_interval')
+            )
+        elif mode == "all":
+            result = simulator.run_all_devices_simulation(
+                delay=kwargs.get('delay'),
+                destination=kwargs.get('destination'),
+                send_duplicates=kwargs.get('duplicates'),
+                duplicate_count=kwargs.get('duplicate_count'),
+                duplicate_interval=kwargs.get('duplicate_interval'),
+                benchmark=kwargs.get('benchmark', False)
+            )
+        elif mode == "mixed":
+            result = simulator.run_mixed_simulation(
+                events_file=kwargs.get('events'),
+                device_id=kwargs.get('device_id'),
+                config_file=kwargs.get('config'),
+                use_all_devices=kwargs.get('use_all_devices'),
+                destination=kwargs.get('destination'),
+                batch_size=kwargs.get('batch_size'),
+                duplicate_probability=kwargs.get('duplicate_probability'),
+                duplicate_count_range=(kwargs.get('duplicate_count_min'), kwargs.get('duplicate_count_max')),
+                time_spread_range=(kwargs.get('time_spread_min'), kwargs.get('time_spread_max')),
+                num_batches=kwargs.get('num_batches'),
+                batch_interval_range=(kwargs.get('batch_interval_min'), kwargs.get('batch_interval_max'))
+            )
+        elif mode == "realistic":
+            result = simulator.run_realistic_scenario(
+                events_file=kwargs.get('events'),
+                device_id=kwargs.get('device_id'),
+                config_file=kwargs.get('config'),
+                use_all_devices=kwargs.get('use_all_devices'),
+                destination=kwargs.get('destination'),
+                scenario_duration=kwargs.get('scenario_duration'),
+                batch_frequency_range=(kwargs.get('batch_frequency_min'), kwargs.get('batch_frequency_max')),
+                duplicate_probability=kwargs.get('duplicate_probability'))
+    finally:
+        # Clean up handlers
+        root_logger.removeHandler(streamlit_handler)
+        root_logger.removeHandler(console_handler)
 
-    elif mode == "device":
-        result = simulator.run_device_specific_simulation(
-            config_file=kwargs.get('config'),
-            delay=kwargs.get('delay'),
-            destination=kwargs.get('destination'),
-            send_duplicates=kwargs.get('duplicates'),
-            duplicate_count=kwargs.get('duplicate_count'),
-            duplicate_interval=kwargs.get('duplicate_interval')
-        )
-
-    elif mode == "all":
-        result = simulator.run_all_devices_simulation(
-            delay=kwargs.get('delay'),
-            destination=kwargs.get('destination'),
-            send_duplicates=kwargs.get('duplicates'),
-            duplicate_count=kwargs.get('duplicate_count'),
-            duplicate_interval=kwargs.get('duplicate_interval'),
-            benchmark=kwargs.get('benchmark', False)
-        )
-
-    elif mode == "mixed":
-        result = simulator.run_mixed_simulation(
-            events_file=kwargs.get('events'),
-            device_id=kwargs.get('device_id'),
-            config_file=kwargs.get('config'),
-            use_all_devices=kwargs.get('use_all_devices'),
-            destination=kwargs.get('destination'),
-            batch_size=kwargs.get('batch_size'),
-            duplicate_probability=kwargs.get('duplicate_probability'),
-            duplicate_count_range=(kwargs.get('duplicate_count_min'), kwargs.get('duplicate_count_max')),
-            time_spread_range=(kwargs.get('time_spread_min'), kwargs.get('time_spread_max')),
-            num_batches=kwargs.get('num_batches'),
-            batch_interval_range=(kwargs.get('batch_interval_min'), kwargs.get('batch_interval_max'))
-        )
-
-    elif mode == "realistic":
-        result = simulator.run_realistic_scenario(
-            events_file=kwargs.get('events'),
-            device_id=kwargs.get('device_id'),
-            config_file=kwargs.get('config'),
-            use_all_devices=kwargs.get('use_all_devices'),
-            destination=kwargs.get('destination'),
-            scenario_duration=kwargs.get('scenario_duration'),
-            batch_frequency_range=(kwargs.get('batch_frequency_min'), kwargs.get('batch_frequency_max')),
-            duplicate_probability=kwargs.get('duplicate_probability')
-        )
-
-    # After simulation, get the captured logs
+    # Get the captured logs
     log_output = log_capture_string.getvalue()
     log_capture_string.close()
-
-    # Clean up the handler from the root logger to avoid memory leaks/duplicate handlers
-    root_logger.removeHandler(ch)
-    # Also remove from simulator_logger if it's explicitly added there
-    if ch in simulator.logger.handlers:
-        simulator.logger.removeHandler(ch)
-
 
     return log_output, result
 

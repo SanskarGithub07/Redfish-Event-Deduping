@@ -18,14 +18,14 @@ st.set_page_config(
 st.title("Redfish Event Deduplication Project 📈")
 st.write("Simulate Redfish events and observe deduplication behavior.")
 
-# --- Custom Log Handler for Streamlit ---
 class StreamlitLogHandler(logging.Handler):
-
-    def __init__(self, placeholder, max_lines=500): # Add max_lines as an argument with a default
+    def __init__(self, placeholder, max_lines=500):
         super().__init__()
         self.placeholder = placeholder
         self.log_messages = []
-        self.max_lines = max_lines # Initialize the attribute
+        self.max_lines = max_lines
+        # Set formatter for this handler
+        self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
     def emit(self, record):
         msg = self.format(record)
