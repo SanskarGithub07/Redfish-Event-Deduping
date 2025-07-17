@@ -744,17 +744,17 @@ class RedfishEventSimulator:
             logger.info(f"Total events sent: {result}")
             logger.info(f"Total events processed: {benchmark_data.get('total_events', 0)}")
             
-            # plot_filename = self.generate_benchmark_plots(benchmark_data, mode)
+            plot_filename = self.generate_benchmark_plots(benchmark_data, mode)
             
-            # csv_filename = self.export_benchmark_data(receiver_url)
+            csv_filename = self.export_benchmark_data(receiver_url)
             
             self._print_benchmark_summary(benchmark_data, mode, total_duration)
             
             return {
                 'simulation_result': result,
                 'benchmark_data': benchmark_data,
-                # 'plot_filename': plot_filename,
-                # 'csv_filename': csv_filename,
+                'plot_filename': plot_filename,
+                'csv_filename': csv_filename,
                 'total_duration': total_duration
             }
         else:
