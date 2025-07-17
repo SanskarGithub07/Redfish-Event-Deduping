@@ -277,6 +277,7 @@ if st.button("Start Simulation", type="primary", disabled=not can_run):
             # The run_simulation function now returns the logs as a string
             # and the simulation result.
             captured_logs, sim_result = run_simulation(**full_params)
+            print(captured_logs)
             
             # The StreamlitLogHandler should already be updating the placeholder,
             # but we can ensure the final state is shown and maybe append summary.

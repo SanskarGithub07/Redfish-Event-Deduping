@@ -69,7 +69,7 @@ class RedfishEventSimulator:
 
         for event in config_data.get('events', []):
             event_copy = event.copy()
-            event_copy['DeviceId'] = device_id
+            event_copy['device_id'] = device_id
             events.append(event_copy)
 
         return events
@@ -90,7 +90,7 @@ class RedfishEventSimulator:
         for event in generic_events:
             event_copy = event.copy()
             if device_id:
-                event_copy['DeviceId'] = device_id
+                event_copy['device_id'] = device_id
             prepared_events.append(event_copy)
 
         return prepared_events
@@ -172,7 +172,7 @@ class RedfishEventSimulator:
         try:
             deduplication_time_window = event_data.get("DeduplicationTimeWindow", 0)
             actions = event_data.get("Actions", [])
-            device_id = event_data.get("DeviceId", "Unknown")
+            device_id = event_data.get("device_id", "Unknown")
 
             test_event_payload = {
                 "EventType": event_data.get("EventType", "Alert"),
@@ -183,7 +183,7 @@ class RedfishEventSimulator:
                 "Severity": event_data.get("Severity", "OK"),
                 "DeduplicationTimeWindow": deduplication_time_window,
                 "Actions": actions,
-                "DeviceId": device_id
+                "device_id": device_id
             }
 
             url = f"{self.emulator_base_url}/redfish/v1/EventService/Actions/EventService.SendTestEvent"
@@ -219,7 +219,7 @@ class RedfishEventSimulator:
                     "OriginOfCondition": event_data.get("OriginOfCondition", {}),
                     "DeduplicationTimeWindow": deduplication_time_window,
                     "Actions": actions,
-                    "DeviceId": device_id
+                    "device_id": device_id
                 }
 
                 event_payload = {
@@ -255,7 +255,7 @@ class RedfishEventSimulator:
     def simulate_duplicate_events(self, event_data, count=3, interval=1):
         successful_sends = 0
 
-        self.logger.info(f"Simulating {count} duplicate events with {interval}s interval for Device: {event_data.get('DeviceId', 'Unknown')}, MessageId: {event_data.get('MessageId', 'Unknown')}")
+        self.logger.info(f"Simulating {count} duplicate events with {interval}s interval for Device: {event_data.get('device_id', 'Unknown')}, MessageId: {event_data.get('MessageId', 'Unknown')}")
         for i in range(count):
             self.logger.info(f"Sending duplicate event {i+1}/{count}")
             if self.send_event(event_data):
@@ -277,7 +277,7 @@ class RedfishEventSimulator:
                 duplicate_count = random.randint(*duplicate_count_range)
                 time_spread = random.uniform(*time_spread_range)
 
-                self.logger.info(f"Creating {duplicate_count} duplicates of event {event.get('MessageId', 'Unknown')} from device {event.get('DeviceId', 'Unknown')} "
+                self.logger.info(f"Creating {duplicate_count} duplicates of event {event.get('MessageId', 'Unknown')} from device {event.get('device_id', 'Unknown')} "
                                f"spread over {time_spread:.1f}s")
 
                 for i in range(duplicate_count):
@@ -369,7 +369,7 @@ class RedfishEventSimulator:
                     self.logger.info(f"Waiting {delay:.1f}s before next event in batch...")
                     time.sleep(delay)
 
-                device_id_str = event.get('DeviceId', 'Unknown')
+                device_id_str = event.get('device_id', 'Unknown')
                 message_id = event.get('MessageId', 'Unknown')
                 self.logger.info(f"Batch {batch_num + 1}, Event {i + 1}/{len(batch)}: "
                                f"Sending {message_id} from {device_id_str}")
@@ -432,7 +432,7 @@ class RedfishEventSimulator:
                 self.logger.info(f"Waiting {wait_time:.1f}s until next event...")
                 time.sleep(wait_time)
 
-            device_id_str = event.get('DeviceId', 'Unknown')
+            device_id_str = event.get('device_id', 'Unknown')
             message_id = event.get('MessageId', 'Unknown')
             elapsed_time = time.time() - start_time
 
@@ -553,7 +553,7 @@ class RedfishEventSimulator:
 
         self.logger.info(f"Starting simulation with {len(events)} events")
         for i, event in enumerate(events, 1):
-            device_id = event.get('DeviceId', 'Unknown')
+            device_id = event.get('device_id', 'Unknown')
             self.logger.info(f"Sending event {i}/{len(events)} from device {device_id}")
 
             if send_duplicates:

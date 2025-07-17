@@ -75,7 +75,7 @@ def get_event_actions(event, device_config=None):
 def generate_event_key(event):
     message_id = event.get('MessageId', event.get('MessageID', 'Unknown'))
     event_type = event.get('EventType', 'Unknown')
-    device_id = event.get('DeviceId', 'Unknown')
+    device_id = event.get('device_id', 'Unknown')
     severity = event.get('Severity', 'Unknown')
     
     origin = event.get('OriginOfCondition', {})
@@ -106,13 +106,13 @@ def is_duplicate_event(event, device_config=None):
             
             if time_diff.total_seconds() < dedup_window:
                 last_event["count"] += 1
-                logger.info(f"Duplicate event detected for device {event.get('DeviceId', 'Unknown')}. Count: {last_event['count']}")
+                logger.info(f"Duplicate event detected for device {event.get('device_id', 'Unknown')}. Count: {last_event['count']}")
                 return True
         
         event_cache[event_key] = {
             "timestamp": current_time,
             "count": 1,
-            "device_id": event.get('DeviceId', 'Unknown')
+            "device_id": event.get('device_id', 'Unknown')
         }
         return False
 
@@ -136,7 +136,7 @@ def execute_actions(actions, event_data, device_config=None):
         logger.info("No actions specified for this event")
         return
     
-    device_id = event_data.get('DeviceId', 'Unknown')
+    device_id = event_data.get('device_id', 'Unknown')
     device_name = device_config.get('device_name', device_id) if device_config else device_id
     
     logger.info(f"Executing actions for device {device_name}: {', '.join(actions)}")
@@ -203,7 +203,7 @@ def process_event(event):
     severity = event.get('Severity', 'Unknown')
     message = event.get('Message', 'No message provided')
     origin = event.get('OriginOfCondition', {})
-    device_id = event.get('DeviceId', 'Unknown')
+    device_id = event.get('device_id', 'Unknown')
     
     device_config = get_device_config(device_id)
     
